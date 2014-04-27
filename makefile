@@ -1,9 +1,16 @@
+CC= gcc
 LIBS=-ledit -lm
-all:
-	ar cr liblispet.a lispet.o mpc.o
-lispet.o:
-	cc -c -std=c99 lispet.c $(LIBS) 
-mpc.o:
-	cc -c -std=c99 mpc.c $(LIBS) 
+CFLAG=-c -std=c99
+SRCS = lispet.c mpc.c functions.c 
+OBJS = $(SRCS:.c=.o)
+
+liblispet.a: $(OBJS) 
+	ar cr $@ $(OBJS) 
+
+%.o: %.c 
+	$(CC) $(CFLAG) -o $@ $< $(LIBS) 
+
+.PHONY: clean
+
 clean:
-	rm -f lispet core *.o *.a 
+	rm -f core *.o *.a 

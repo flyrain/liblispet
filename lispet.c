@@ -3,19 +3,7 @@
 #include <assert.h>
 #include "mpc.h"
 #include <math.h>
-
-#define LASSERT(args, cond, fmt, ...) \
-    if (!(cond)) {lval* err = lval_err(fmt, ##__VA_ARGS__); lval_del(args); return err;}
-
-#define LASSERT_TYPE(func, args, index, expect) \
-    LASSERT(args, args->cell[index]->type == expect,    \
-        "Function '%s' passed incorrect type for argument %i. Got %s, Expected %s.", \
-            func, index, ltype_name(args->cell[index]->type), ltype_name(expect)) 
-        
-#define LASSERT_NUM(func, args, expect)                \
-    LASSERT(args, args->count == expect, \
-        "Function '%s' passed incorrect number of arguments. Got %i, Expected %i.", \
-            func, args->count, expect)
+#include "lispet.h"
 
 #ifdef _WIN32
 
@@ -42,10 +30,6 @@ void add_history(char * unused){}
 #endif
 
 //Forward Declarations
-struct lval;
-struct lenv;
-typedef struct lval lval;
-typedef struct lenv lenv;
 mpc_parser_t* Number;
 mpc_parser_t* Symbol;
 mpc_parser_t* String;
@@ -54,47 +38,6 @@ mpc_parser_t* Sexpr;
 mpc_parser_t* Qexpr;
 mpc_parser_t* Expr;
 mpc_parser_t* Lispy;
-
-//Lval Types
-enum {LVAL_NUM, LVAL_ERR, LVAL_SYM, LVAL_STR, LVAL_FUN, LVAL_SEXPR, LVAL_QEXPR};
-
-typedef lval* (*lbuiltin)(lenv*, lval*);
-
-struct lval{
-    int type;
-
-    // Basic
-    long num;
-    char* err;
-    char* sym;
-    char* str;
-
-    // Function
-    lbuiltin builtin;
-    lenv* env;
-    lval* formals;
-    lval* body;
-
-    // Expression
-    int count;
-    lval ** cell;
-};
-
-struct lenv{
-    lenv* par;
-    int count;
-    char ** syms;
-    lval** vals;
-};
-
-static void lval_del(lval* v);
-static lval* lval_err(char * fmt, ...);
-static lval* lval_copy(lval* v);
-
-static lval* lval_pop(lval* v, int i);
-static lval* lval_take(lval* v, int i);
-
-lval* lval_call(lenv* e, lval* f, lval*a);
 
 lval* lval_str(char* s)
 {
@@ -105,7 +48,7 @@ lval* lval_str(char* s)
      return v;
 }
 
-static char * ltype_name(int t)
+char * ltype_name(int t)
 {
     switch(t) {
     case LVAL_FUN: return "Function";
@@ -213,7 +156,7 @@ static lval* lval_num(long x)
     return v;
 }
 
-static lval* lval_err(char * fmt, ...)
+lval* lval_err(char * fmt, ...)
 {
     lval* v = malloc(sizeof(lval));
     v->type = LVAL_ERR;
@@ -268,7 +211,7 @@ static lval* lval_qexpr(void)
     return v;
 }
 
-static void lval_del(lval* v)
+void lval_del(lval* v)
 {
     switch (v->type) {
     case LVAL_NUM: break;
@@ -311,7 +254,7 @@ static lenv* lenv_copy(lenv* e)
     return n;
 }
 
-static lval* lval_copy(lval* v)
+lval* lval_copy(lval* v)
 {
     lval* x = malloc(sizeof(lval));
     x->type = v->type;
@@ -504,7 +447,7 @@ static lval* lval_eval(lenv* e, lval* v)
     return v;
 }
 
-static lval* lval_pop(lval* v, int i)
+lval* lval_pop(lval* v, int i)
 {
     lval* x = v->cell[i];
     
@@ -519,7 +462,7 @@ static lval* lval_pop(lval* v, int i)
     return x;
 }
 
-static lval* lval_take(lval* v, int i )
+lval* lval_take(lval* v, int i )
 {
     lval* x = lval_pop(v,i);
     lval_del(v);
@@ -959,13 +902,15 @@ lval* lval_call(lenv* e, lval* f, lval*a)
     }
 }
 
-static void lenv_add_builtin(lenv* e, char* name, lbuiltin func)
+void lenv_add_builtin(lenv* e, char* name, lbuiltin func)
 {
     lval* k = lval_sym(name);
     lval* v = lval_fun(func);
     lenv_put(e, k, v);
     lval_del(k); lval_del(v);
 }
+
+extern void lenv_add_extern_fun(lenv* e);
 
 static void lenv_add_builtins(lenv *e)
 {
@@ -1004,49 +949,10 @@ static void lenv_add_builtins(lenv *e)
     lenv_add_builtin(e, "!=", builtin_ne);
     //if
     lenv_add_builtin(e, "if", builtin_if);
+    
+    //add external functions
+    lenv_add_extern_fun(e);
 } 
-
-/*
-int input_eval(lenv* e, mpc_parser_t* Lispy, char * input){
-    mpc_result_t r;
-    if(mpc_parse("<stdin>", input, Lispy, &r) == 1){
-        lval* result = lval_read(r.output);
-        lval* x = lval_eval(e, result); 
-        int is_err = 0;
-        if(x->type == LVAL_ERR){
-            lval_println(x);
-            is_err = 1;
-        }
-        lval_del(x);
-        mpc_ast_delete(r.output);
-        if(is_err)
-            return 0;
-        return 1;
-    }else{
-        mpc_err_print(r.error);
-        mpc_err_delete(r.error);
-    }
-    return 0;
-}
-
-void func_predefine(lenv* e, mpc_parser_t* Lispy ){
-    //'fun' to define fun easily
-    input_eval(e, Lispy, "def {fun} (\\ {args body} {def (head args) (\\ (tail args) body)})");
-    //'curry' aka 'unpack', which unpack list arguments.
-    input_eval(e, Lispy, "fun {unpack f xs} {eval (join (list f) xs)}");
-    input_eval(e, Lispy, "def {curry} unpack");
-    //'uncurry' aka 'pack', which pack all arguments to a list
-    input_eval(e, Lispy, "fun {pack f & xs} {f xs}");
-    input_eval(e, Lispy, "def {uncurry} pack");
-}
-
-
-void test_case(lenv* e, mpc_parser_t* Lispy ){
-    assert(input_eval(e, Lispy, "fun {add & xs} {curry + xs}"));
-    assert(input_eval(e, Lispy, "fun {len l} {if (== l {}) {0} {+ 1 (len (tail l))}}"));
-    puts("All test cases passed"); 
-}
-*/
 
 void interpreter(lenv* e, mpc_parser_t* Lispy){
     puts("Lispy Version 0.0.0.0.1");
