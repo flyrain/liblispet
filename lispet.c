@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <unistd.h>
 #include "mpc.h"
 #include <math.h>
 #include "lispet.h"
@@ -658,6 +659,21 @@ static lval* builtin_head(lenv* e, lval* a)
     return v;
 }
 
+static lval* builtin_sleep(lenv* e, lval* a)
+{
+    //sleep for x seconds
+    LASSERT_NUM("sleep", a, 1);
+    LASSERT_TYPE("sleep", a, 0, LVAL_NUM);
+ 
+    lval* v = lval_take(a, 0);
+    
+    sleep(v->num);
+    
+    return v;
+}
+
+
+//the cdr function
 static lval* builtin_tail(lenv* e, lval* a)
 {
     LASSERT_NUM("tail", a, 1);
@@ -669,6 +685,7 @@ static lval* builtin_tail(lenv* e, lval* a)
     return v;
 }
 
+//the car function 
 static lval* builtin_init(lenv* e, lval* a)
 {
     LASSERT_NUM("init", a, 1);
@@ -949,7 +966,9 @@ static void lenv_add_builtins(lenv *e)
     lenv_add_builtin(e, "!=", builtin_ne);
     //if
     lenv_add_builtin(e, "if", builtin_if);
-    
+
+    //sleep
+    lenv_add_builtin(e, "sleep", builtin_sleep);
     //add external functions
     lenv_add_extern_fun(e);
 } 
